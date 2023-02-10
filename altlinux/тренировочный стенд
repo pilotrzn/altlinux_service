@@ -1,0 +1,203 @@
+Требования к системе:
+~# cat /etc/os-release
+NAME="ALT SPServer"
+VERSION="8.2"
+ID=altlinux
+VERSION_ID=8.2
+PRETTY_NAME="ALT 8 SP Server (cliff)"
+ANSI_COLOR="1;33"
+CPE_NAME="cpe:/o:alt:spserver:8.2"
+
+~# uname -a
+Linux db-pgsql-n01 5.4.68-std-def-alt1.4.c9f #1 SMP Thu Nov 19 04:35:08 UTC 2020 x86_64 GNU/Linux
+
+Дисковое пространство:
+50Гб под /
+подключенный нераспределенный диск под базу данных(размер запрашивают разработчики под свое ПО)
+
+описание работы с домашним кластером 
+на стенде 2 ВМ с Альт Сервер 8 СП(образиз ЦИК, доработанный соларом) 
+для каждой ВМ создан диск для данных бд
+примаплен в каталог /var/lib/pgpro/
+
+ВМ с Альт Сервер 9(скачанный из интернета текущий образ)
+
+
+для клонирования вм попробовать 
+~# rm -f /etc/udev/rules.d/70-persistent-net.rules
+~# sudo ln -s /dev/null /etc/udev/rules.d/70-persistent-net.rules
+чтобы не переименовывались интерфейсы
+
+
+1. настройка альт 8
+пользователи:
+root: Xeybveyb=2022
+altlinux: AhCh9oze
+Разрешить подключение root по ssh:
+
+
+2. Установка обновлений и пакетов
+~# su -
+~# apt-get update && apt-get --enable-upgrade upgrade -y && apt-get install sudo nano tmux tzdata wget atop htop sysstat -y
+~# apt-get install gcc python3-dev python3-module-pip python3-module-setuptools   -y
+
+3. подключение репозитория и установка Postgrespro. для ЦИК используется версия 11.11. на стенде делаем текущую, 11.18
+
+~# wget https://repo.postgrespro.ru/pgpro-11/keys/pgpro-repo-add.sh
+~# sh pgpro-repo-add.sh 
+
+после установки и проверки работы выключаем сервер, отключаем запуск службы, очищаем диск
+
+4. подготовка к установке патрони
+чтобы сохранить локальную копию pip создаем каталог pip, заходим в него, выполняем
+~# pip3 download patroni 
+~# pip3 download psycopg2
+~# pip3 download python-etcd
+
+будут загружены зависимые пакеты.
+каталог можно перенести на другой сервер и там выполнить установку с выключенным интернетом
+~# pip3 install *
+
+5. конфигурирование патрони
+~# mkdir -p /var/lib/pgpro/std-11/data && chown -R postgres:postgres /var/lib/pgpro/std-11/ &&  chmod -R 700 /var/lib/pgpro/std-11/
+~# mkdir /var/log/patroni && chown postgres:postgres /var/log/patroni
+
+создаем конфиг файл /etc/patroni/patroni.yml
+
+scope: cluster
+name: pgsql02
+namespace: /home/
+
+restapi:
+  listen: 192.168.56.116:8008
+  connect_address: 192.168.56.116:8008
+  auth: patroni:654321
+
+etcd:
+  hosts: 192.168.56.117:2379
+  protocol: http
+  username: patroni
+  password: p123456p
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout : 20
+    maximum_lag_on_failover: 1048576
+    synchronous_mode: true
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_keep_segments: 1024
+        wal_level: hot_standby
+        synchronous_commit: "on"
+        synchronous_standby_names: "*"
+        hot_standby: "on"
+
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+    - locale: ru_RU.UTF-8
+  pg_hba:
+    - host replication replicator 192.168.56.115/32 md5
+    - host all all 192.168.56.115/32 md5
+
+postgresql:
+  listen: 127.0.0.1,{virt ip},{local ip}:5432
+  connect_address: {local ip}:5432
+  data_dir: /var/lib/pgpro/std-11/data
+  bin_dir: /opt/pgpro/std-11/bin
+  authentication:
+    replication:
+       username: replicator
+       password: '123456'
+    superuser:
+       username: postgres
+       password: 'p654321p'
+    rewind:
+       username: rewind_user
+       password: '123456'
+
+tags:
+    nofailover: false
+    noloadbalance: false
+    clonefrom: false
+    nosync: false
+
+log:
+  level: INFO
+  dir: /var/log/patroni
+  file_num: 7
+  file_size: 157286400 # bytes
+
+
+конфиг службы
+
+~# cat <<EOF | sudo tee /etc/systemd/system/patroni.service
+[Unit]
+Description=Orchestrate a high-availability PostgreSQL
+After=syslog.target network.target
+
+[Service]
+Type=simple
+
+User=postgres
+Group=postgres
+
+WorkingDirectory=/var/lib/pgpro
+
+ExecStart=/usr/local/bin/patroni /etc/patroni/patroni.yml
+
+ExecReload=/bin/kill -HUP $MAINPID
+
+KillMode=process
+
+TimeoutSec=30
+
+#Restart=on-failure
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
+~# systemctl daemon-reload
+~# systemctl start patroni.service
+
+на данном этапе должно все запуститься
+
+
+
+vip-manager
+
+# config for vip-manager by Cybertec Schönig & Schönig GmbH
+# time (in milliseconds) after which vip-manager wakes up and checks if it needs to register or release ip addresses.
+interval: 1000
+
+# the etcd or consul key which vip-manager will regularly poll.
+trigger-key: "/home/cluster/leader"
+trigger-value: "pgsql02"
+
+ip: 192.168.56.118 # the virtual ip address to manage
+netmask: 24 # netmask for the virtual ip
+interface: eth1 #interface to which the virtual ip will be added
+
+# how the virtual ip should be managed. we currently support "ip addr add/remove" through shell commands or the Hetzner api
+hosting-type: basic # possible values: basic, or hetzner.
+
+dcs-type: etcd # etcd or consul
+# a list that contains all DCS endpoints to which vip-manager could talk.
+dcs-endpoints:
+  - http://192.168.56.117:2379
+etcd-user: "patroni"
+etcd-password: "p123456p"
+# how often things should be retried and how long to wait between retries. (currently only affects arpClient)
+retry-num: 2
+retry-after: 250  #in milliseconds
+
+# verbose logs (currently only supported for hetzner)
+verbose: false
+

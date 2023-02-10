@@ -1,0 +1,113 @@
+
+apt-get update && apt-get --enable-upgrade upgrade -y && apt-get install nano tmux tzdata wget atop htop sysstat -y
+
+установка etcd
+#apt-get install etcd  tzdata
+
+echo -e "172.29.11.197\tpatroni1\n172.29.11.198\tpatroni2\n172.29.11.199\tpatroni3" >> /etc/hosts
+
+/etc/etcd/etcd.conf
+
+Пример кластера инп в ок.
+
+# [member]
+ETCD_NAME=app-etcd-db01
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+ETCD_HEARTBEAT_INTERVAL="1000"
+ETCD_ELECTION_TIMEOUT="5000"
+ETCD_LISTEN_PEER_URLS="http://10.0.219.100:2380"
+ETCD_LISTEN_CLIENT_URLS="http://10.0.219.100:2379,http://127.0.0.1:2379"
+#ETCD_MAX_SNAPSHOTS="5"
+#ETCD_MAX_WALS="5"
+#ETCD_CORS=""
+#
+#[cluster]
+ETCD_ENABLE_V2=true
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://10.0.219.100:2380"
+ETCD_INITIAL_CLUSTER="app-etcd-db01=http://10.0.219.100:2380,app-etcd-db02=http://10.0.219.101:2380,app-etcd-db03=http://10.0.219.102:2380"
+#ETCD_INITIAL_CLUSTER_STATE="new"
+ETCD_INITIAL_CLUSTER_STATE="existing"
+ETCD_INITIAL_CLUSTER_TOKEN="etcd-cluster-inp"
+ETCD_ADVERTISE_CLIENT_URLS="http://10.0.219.100:2379"
+
+
+
+
+на ноуте
+
+# [member]
+ETCD_NAME=etcd01
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+ETCD_HEARTBEAT_INTERVAL="1000"
+ETCD_ELECTION_TIMEOUT="5000"
+ETCD_LISTEN_PEER_URLS="http://192.168.56.107:2380"
+ETCD_LISTEN_CLIENT_URLS="http://192.168.56.107:2379"
+
+#[cluster]
+ETCD_ENABLE_V2=true
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://192.168.56.107:2380"
+ETCD_INITIAL_CLUSTER="etcd01=http://192.168.56.107:2380"
+ETCD_INITIAL_CLUSTER_STATE="new"
+#ETCD_INITIAL_CLUSTER_STATE="existing"
+ETCD_INITIAL_CLUSTER_TOKEN="etcd"
+ETCD_ADVERTISE_CLIENT_URLS="http://192.168.56.107:2379"
+
+
+
+
+
+
+
+
+
+
+# [member]
+ETCD_NAME=etcdn1
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+ETCD_HEARTBEAT_INTERVAL="1000"
+ETCD_ELECTION_TIMEOUT="5000"
+ETCD_LISTEN_PEER_URLS="http://192.168.56.104:2380"
+ETCD_LISTEN_CLIENT_URLS="http://192.168.56.104:2379,http://127.0.0.1:2379"
+
+
+
+# [member]
+ETCD_NAME=etcdn2
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+ETCD_HEARTBEAT_INTERVAL="1000"
+ETCD_ELECTION_TIMEOUT="5000"
+ETCD_LISTEN_PEER_URLS="http://192.168.56.105:2380"
+ETCD_LISTEN_CLIENT_URLS="http://192.168.56.105:2379,http://127.0.0.1:2379"
+
+#[cluster]
+ETCD_ENABLE_V2=true
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://192.168.56.105:2380"
+ETCD_INITIAL_CLUSTER="etcdn1=http://192.168.56.104:2380,etcdn2=http://192.168.56.105:2380,etcdn3=http://192.168.56.106:2380"
+#ETCD_INITIAL_CLUSTER_STATE="new"
+ETCD_INITIAL_CLUSTER_STATE="existing"
+ETCD_INITIAL_CLUSTER_TOKEN="etcd-clust"
+ETCD_ADVERTISE_CLIENT_URLS="http://192.168.56.105:2379"
+
+
+# [member]
+ETCD_NAME=etcdn3
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+ETCD_HEARTBEAT_INTERVAL="1000"
+ETCD_ELECTION_TIMEOUT="5000"
+ETCD_LISTEN_PEER_URLS="http://192.168.56.106:2380"
+ETCD_LISTEN_CLIENT_URLS="http://192.168.56.106:2379,http://127.0.0.1:2379"
+
+#[cluster]
+ETCD_ENABLE_V2=true
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://192.168.56.106:2380"
+ETCD_INITIAL_CLUSTER="etcdn1=http://192.168.56.104:2380,etcdn2=http://192.168.56.105:2380,etcdn3=http://192.168.56.106:2380"
+#ETCD_INITIAL_CLUSTER_STATE="new"
+ETCD_INITIAL_CLUSTER_STATE="existing"
+ETCD_INITIAL_CLUSTER_TOKEN="etcd-clust"
+ETCD_ADVERTISE_CLIENT_URLS="http://192.168.56.106:2379"
+
+сначала все ноды запустить с 
+ETCD_INITIAL_CLUSTER_STATE="new"
+после соановить и выставить existing
+
+ETCDCTL_API=3 etcdctl endpoint status --cluster -w table

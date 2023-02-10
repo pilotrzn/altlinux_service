@@ -1,0 +1,66 @@
+настройка локального бармана
+1. на сервере с альтлинукс  усмтановить пакеты (скачиваются отдельно)
+   $pip3 install argcomplete-2.0.0-py2.py3-none-any.whl
+   $pip3 install barman-3.0.1-py2.py3-none-any.whl
+   
+2. создать пользователя barman с домашним каталогом /var/lib/barman
+   adduser -s /bin/bash -d /var/lib/barman barman
+   
+3. создать каталоги и настроить права
+   mkdir -p /etc/barman.d
+   mkdir - /var/log/barman
+   chown -R barman:barman /var/log/barman
+   chmod -R 755 /var/log/barman
+   
+4. создаем конфиги
+   vim /etc/barman.conf  (сокращенный вариант)
+   
+   [barman]
+   barman_user = barman
+   configuration_files_directory = /etc/barman.d
+   barman_home = /var/lib/barman
+   
+   ; Log location
+   log_file = /var/log/barman/barman.log
+   log_level = INFO
+   
+   compression = gzip
+   
+   retention_policy = REDUNDANCY 3
+   
+5.   vim /etc/barman.d/barman.conf
+   
+   [clust]
+   description = "cluster rsync backup"
+   conninfo = user=barman dbname=postgres
+   streaming_conninfo = user=barman
+   backup_options = concurrent_backup
+   backup_method = rsync
+   streaming_backup_name = barman_streaming_backup
+   streaming_archiver = on
+   slot_name = bkp_rsync_slot1
+   create_slot = auto
+   reuse_backup = link
+   archiver = on
+   backup_directory = "/srk/barman/inp-ozk"
+   ssh_command = ssh postgres@localhost
+   path_prefix = "/opt/pgpro/std-11/bin/"
+
+6. настраиваем параметр archive_command
+   rsync -a %p barman@localhost:/srk/barman/inp-ozk/incoming/%f
+
+7. под рутом crontab -e 
+   * * * * * [ -x /usr/local/bin/barman ] && /usr/local/bin/barman -q cron
+   
+   
+8. на ноде должен быть примонтирован сетевой ресурс
+   10.0.214.151:/PG_dump/  /srk/barman     nfs     rw,soft 0       0
+   горячий маунт 
+   mount -t nfs -o rw,sync 10.0.214.151:/PG_dump/ /srk/barman
+   
+9.  предположительно ssh ключи не нужны, но если чтото не пойдет - создать и добавить(на одной машине не должно возникать проблем)
+10. pg_hba.conf тоже не требует настрйоки если есть запись
+    host    all             all             127.0.0.1/32            trust
+
+11. можно скорректировать /etc/hosts
+    добавить имя машины

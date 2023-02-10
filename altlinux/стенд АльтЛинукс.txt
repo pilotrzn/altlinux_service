@@ -1,0 +1,553 @@
+
+после установки системы выполняем 
+
+1. Настройка безопасности.
+- меняем пароли дефолтного пользователя, желательно сменить пароль root.
+- проверяем наличие сторонних ssh ключей в authorized_keys, неизвестные удаляем.
+
+2. Обновление и установка ПО.
+
+Проверяем репозитории Альлинукса. Для стенда:
+
+rpm http://10.0.176.29/altlinux c9f1/branch/x86_64 classic
+rpm http://10.0.176.29/altlinux c9f1/branch/x86_64-i586 classic
+rpm http://10.0.176.29/altlinux c9f1/branch/noarch classic
+
+Все остальные можно удалить как неактуальные.
+
+#su -
+root ~# apt-get update && apt-get dist-upgrade
+root ~# apt-get install sudo nano tzdata wget atop htop sysstat tmux
+root ~# reboot
+
+3. Лимиты
+в АльтЛинукс заданы лимиты на количество процессов и открытых файлов(скорее всего Солар)
+
+~# cat <<EOF | sudo tee /etc/security/limits.d/50-defaults.conf
+
+root            soft    nproc   10000
+*               -       nproc   10000
+*               -       nofile  10000
+*               soft    memlock unlimited
+*               hard    memlock unlimited
+EOF
+
+ 
+
+4. Репозитории postgrespro. Установка postgrespro
+Добавляем репозиторий для postgrespro
+
+touch /etc/apt/source.list.d/pgpro.list
+cat <<EOF | sudo tee /etc/apt/sources.list.d/pgpro.list
+#postgrespro
+rpm http://10.0.176.29/psqlpro11_11/altlinux-spt/8/ noarch pgpro
+rpm http://10.0.176.29/psqlpro11_11/altlinux-spt/8/ x86_64 pgpro
+EOF
+
+root ~# apt-get update 
+root ~# apt-get install postgrespro-std-11
+
+5. Диски для БД
+
+в случае с ЦИК каталог с бд расположен в /data/<project_name>/pgsql. Каталог с логами пг /data/<project_name>/pglog, так исторически сложилось от ЦТ.
+Для БД подключен отдельный диск. В дальнейшем планирую не использовать имя проекта в пути к бд. Так можно избежать индивидуальных настроек и исползовать шаблонные.
+Как вариант /data/postgresql/{data, pglog}
+
+настраиваем диски
+root ~# fdisk /dev/vdb (n p w)
+root ~# mkfs.ext4 /dev/vdb1         (ext4)
+root ~# mkdir /data
+root ~# echo '/dev/vdb1 /data ext4 default 0 0' >> /etc/fstab
+root ~# mount -a
+root ~# mkdir -p /data/{project}/{pgsql,pglog}
+root ~# chown -R postgres:postgres /data/{project}
+root ~# chmod -R  700 /data/{project}/
+
+5.1. Расширение диска
+в конфигураторе виртуальных носителей расширяем диск при выключенной ВМ
+включаем машину.под рутом выполняем:
+~# fdisk /dev/sdb
+вводим команды
+d -- удаляет раздел, данные не пропадут!
+n
+когда спросит про сигнатуру - ждем N
+w
+после чего выполнится синхронизация дисков.
+далее выполняем:
+~# resize2fs /dev/sdb1
+выполнится изменение
+
+в случае альта 
+growpart /dev/sda 1
+xfs_growfs / -d
+
+
+6. Инициализация кластера
+
+root ~# systemctl stop postgrespro-std-11.service
+root ~# passwd postgres  (задаем пароль пользователю) 
+root ~# su - postgres
+postgres ~$ initdb -k -E UTF8 -D /data/{project_name}/pgsql
+
+проверка возможности запуска нового кластера(можно не делать)
+postgres ~$ pg_ctl -D /data/{project_name}/pgsql start
+postgres ~$ pg_ctl -D /data/{project_name}/pgsql stop
+
+Путь до каталога PGDATA задается в файле /etc/default/postgrespro-std-11
+PGDATA=/var/lib/pgpro/std-11/data
+меняем на наш путь до бд:
+/data/{project_name}/pgsql
+Так же прописываем переменную окружения PGDATA в /etc/profile
+export PGDATA="/data/{project_name}/pgsql"
+
+правим pg_hba.conf
+заменяем все trust на md5, иначе будут ломиться отовсюду свободно без пароля
+
+root ~# systemctl start postgrespro-std-11.service
+
+кластер должен запуститься, о работоспособности информация будет записана в лог /data/{project_name}/pglog/* 
+
+так как мы закрыли все возможнные входы на сервер(кроме администратора, который знает root и altlinux)
+можем в домашнем каталоге postgres создать файл .pgpass
+
+localhost:5432:*:postgres:OurGrandSecretPassword
+
+с целью не вводить его каждый раз, когда админим базу.
+файлу требуется задать права 600!!!
+
+7. Настройка PostgreSQL
+
+редактируем postgresql.conf(можно под пользователем postgres)
+postgres ~$ cd /data/{project_name}/pgsql
+postgres ~$ mv postgresql.conf postgresql.conf.bak
+postgres ~$ nano postgresql.conf
+вставляем подготовленный конфиг
+
+Настройка huge_pages
+Под пользователем postgres создаем скрипт huge.sh
+
+#!/bin/bash
+pid=`head -1 $PGDATA/pdpostmaster.pid`
+echo "Pid:            $pid"
+peak=`grep ^VmPeak /proc/$pid/status | awk '{ print $2 }'`
+echo "VmPeak:            $peak kB"
+hps=`grep ^Hugepagesize /proc/meminfo | awk '{ print $2 }'`
+echo "Hugepagesize:   $hps kB"
+hp=$((peak/hps))
+echo Set Huge Pages:     $hp
+
+root ~# echo 'vm.nr_hugepages={полученное значение, округлить до большего}' >> /etc/sysctl.d/99-sysctl.conf
+root ~# echo 'vm.swappiness = 5' >> /etc/sysctl.d/99-sysctl.conf
+root ~# sysctl -p --system
+
+Далее включить параметр huge_pages='on' в конфиге postgresql.conf и выполнить перезапуск сервера
+root ~# systemctl restart postgrespro-std-11.service
+
+
+
+
+
+--костыльное но рабочее решение заменить питон 3.5 на 3.7, так будет работать патрони
+      apt-get install bzlib-devel libncurses-devel libgdbm-devel libnss-devel libssl-devel libreadline-devel libffi-devel libffi-devel zlib-devel libnss-devel libnss-devel  gcc5 
+
+      версии на выбор
+      wget https://www.python.org/ftp/python/3.7.4/Python-3.7.4.tgz
+      wget https://www.python.org/ftp/python/3.7.13/Python-3.7.13.tgz
+
+      tar -xf Python-3.x.x.tgz
+      cd Python-3.x.x
+      ./configure 
+      make
+      sudo make install
+
+      удалить версию 3.5
+      sudo apt-get remove python3
+
+      sudo pip3 install --upgrade pip setuptools testresources psycopg2-binary patroni patroni[etcd]
+-----------------------------------------------------------------------------------------------
+
+
+
+
+
+
+репо для про версии (для тестов при наличии интернета)
+wget https://repo.postgrespro.ru/pgpro-11/keys/pgpro-repo-add.sh
+sh pgpro-repo-add.sh
+
+для клонирования вм попробовать 
+sudo ln -s /dev/null /etc/udev/rules.d/70-persistent-net.rules
+чтобы не переименовывались интерфейсы
+
+настройка стенда
+
+
+/etc/security/limits.d/50-defaults.conf
+настройка лимитов
+root            soft    nproc   10000
+*               -       nproc   10000
+*               -       nofile  10000
+*               soft    memlock unlimited
+*               hard    memlock unlimited
+
+правим swapiness
+/etc/sysctl.d/99-sysctl.conf
+vm.swappiness = 10
+
+#systcl - p --system
+
+репозитории для стенда
+#OS
+rpm http://10.0.176.29/altlinux c9f1/branch/x86_64 classic
+rpm http://10.0.176.29/altlinux c9f1/branch/x86_64-i586 classic
+rpm http://10.0.176.29/altlinux c9f1/branch/noarch classic
+#postgrespro
+rpm http://10.0.176.29/psqlpro11_11/altlinux-spt/8/ noarch pgpro
+rpm http://10.0.176.29/psqlpro11_11/altlinux-spt/8/ x86_64 pgpro
+
+репозитории для Открытого контура
+#OS
+rpm  http://10.0.223.141/altlinux/ c9f1/branch/x86_64 classic
+rpm  http://10.0.223.141/altlinux/ c9f1/branch/x86_64-i586 classic
+rpm  http://10.0.223.141/altlinux/ c9f1/branch/noarch classic
+#postgrespro
+rpm http://10.0.223.141/psql11pro/altlinux-spt/8 x86_64 pgpro
+rpm http://10.0.223.141/psql11pro/altlinux-spt/8 noarch pgpro
+
+
+
+обязательно удаляем или коментируем все репы с интернет адресами, а так же cd rom
+
+# apt-get update && apt-get dist-upgrade -y
+# reboot
+# apt-get install atop htop nano sysstat tmux tzdata postgrespro-std-11
+
+
+
+
+в случае с ЦИК каталог с бд расположен в /data/<project_name>/pgsql
+для БД подключен отдельный диск
+
+настраиваем диски
+# fdisk /dev/vdb (n p w)
+# mkfs.ext4 /dev/vdb1         (ext4)
+# mkdir /data
+ поправить запись в fstab
+ /dev/vdb1 /data ext4 default 0 0
+
+# mount -a
+
+# mkdir -p /data/{project}/{pgsql,pglog}
+# chown -R postgres:postgres /data/{project}
+# chmod -R  700 /data/{project}/
+
+настраиваем postgresql
+# systemctl stop postgrespro-std-11.service
+# passwd postgres  (задаем пароль пользователю) 
+# su - postgres
+$ initdb -k -E UTF8 -D /data/{project_name}/pgsql
+
+проверка возможности запуска нового кластера(можно не делать)
+$ pg_ctl -D /data/{project_name}/pgsql start
+$ pg_ctl -D /data/{project_name}/pgsql stop
+
+переменная PGDATA задается в файле /etc/default/postgrespro-std-11
+PGDATA=/var/lib/pgpro/std-11/data
+меняем на наш путь до бд:
+/data/{project_name}/pgsql
+
+редактируем postgresql.conf(можно под пользователем postgres)
+$ cd /data/{project_name}/pgsql
+$ mv postgresql.conf postgresql.conf.bak
+$ nano postgresql.conf
+вставляем подготовленный конфиг
+
+правим pg_hba.conf
+заменяем все trust на md5, иначе будут ломиться отовсюду свободно без пароля
+
+# systemctl start postgrespro-std-11.service
+
+кластер должен запуститься, о работоспособности информация будет записана в лог /data/{project_name}/pglog/* 
+
+так ка мы закрыли все возможнные входы на сервер(кроме администратора, который знает root и altlinux)
+можем в домашнем каталоге postgres создать файл .pgpass
+localhost:5432:*:postgres:ourgrandsecretpassword
+с целью не вводить его каждый раз, когда админим базу.
+файлу требуется задать права 600!!!
+
+далее по обращению от  разработчиков создаем роли.
+best practice:
+создаем общую роль app_connect без каких либо прав.
+в нее добавляем роль app c правами login, createdb (если очень требуется)
+далее в hba настраиваем доступ для группы app_connect для конкретной бд.
+один из примеров:
+# ===================================================
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# "local" is for Unix domain socket connections only
+local   all             all                                     md5
+# IPv4 local connections:
+host    all             all             127.0.0.1/32            md5
+# IPv6 local connections:
+host    all             all             ::1/128                 md5
+# app
+host    tvs     +app_connect    10.0.180.209/32 md5
+
+
+варианты группировок доступов различны, стоит продумывать их.
+
+
+
+после установки постгриса остановить и выключить службу пг и удалить все содержимое каталога с данными бд
+
+
+ALTER DATABASE name OWNER TO new_owner;
+
+
+
+сконфигурить patroni
+пример одной из нод
+---
+scope: cluster1
+name: pgsql01
+namespace: /home/
+
+restapi:
+  listen: 192.168.56.107:8008
+  connect_address: 192.168.56.107:8008
+
+etcd:
+  hosts: 192.168.56.104:2379,192.168.56.105:2379,192.168.56.106:2379
+  protocol: http
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout : 10
+    maximum_lag_on_failover: 1048576
+    synchronous_mode: true
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_keep_segments: 5120
+        wal_level: hot_standby
+        synchronous_commit: "on"
+        synchronous_standby_names: "*"
+        hot_standby: "on"
+
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+    - locale: ru_RU.UTF-8
+  pg_hba:
+    - host replication replicator 192.168.56.100/24 trust
+    - host all all 0.0.0.0/0 trust
+
+postgresql:
+  listen: 127.0.0.1,192.168.56.107:5432
+  connect_address: 192.168.56.107:5432
+  data_dir: /var/lib/pgpro/std-11/data
+  bin_dir: /opt/pgpro/std-11/bin
+  authentication:
+    replication:
+       username: replicator
+       password: '123456'
+    superuser:
+       username: postgres
+       password: '123456'
+    rewind:
+       username: rewind_user
+       password: '123456'
+
+tags:
+    nofailover: false
+    noloadbalance: false
+    clonefrom: false
+-----
+
+после конфигурации создать службу
+#nano /etc/systemd/system/patroni.service	
+
+# This is an example systemd config file for Patroni
+# You can copy it to "/etc/systemd/system/patroni.service",
+[Unit]
+Description=Runners to orchestrate a high-availability PostgreSQL
+After=syslog.target network.target
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+# Read in configuration file if it exists, otherwise proceed
+EnvironmentFile=-/etc/patroni_env.conf
+WorkingDirectory=~
+# Where to send early-startup messages from the server
+# This is normally controlled by the global default set by systemd
+#StandardOutput=syslog
+# Pre-commands to start watchdog device
+# Uncomment if watchdog is part of your patroni setup
+#ExecStartPre=-/usr/bin/sudo /sbin/modprobe softdog
+#ExecStartPre=-/usr/bin/sudo /bin/chown postgres /dev/watchdog
+# Start the patroni process
+ExecStart=/usr/local/bin/patroni /etc/patroni.yml
+# Send HUP to reload from patroni.yml
+ExecReload=/bin/kill -s HUP $MAINPID
+# only kill the patroni process, not it's children, so it will gracefully stop postgres
+KillMode=process
+# Give a reasonable amount of time for the server to start up/shut down
+TimeoutSec=30
+# Do not restart the service if it crashes, we want to manually inspect database on failure
+Restart=no
+[Install]
+WantedBy=multi-user.target
+
+далее перезапустить демона
+#systemctl daemon-reload
+#systemctl start patroni.service
+
+после запустить патрони на первой ноде
+будет создан новый кластер.
+в статусе службы должно появиться  I am (pgsql01), the leader with the lock 
+после чего запускаем вторую ногу
+
+если нужно пересоздавать кластер, сначала удаляем информацию о нем из etcd
+# patronictl -c /etc/patroni/patroni.yml remove <cluster_name>
+
+#etcdctl rm /service/cluster-name --recursive 
+
+
+rpm https://distrib-coffee.ipsl.jussieu.fr/pub/linux/altlinux/Sisyphus 
+
+варианты
+--каталоги для бд
+#mkdir -p /db/main
+#mkdir -p /db/log
+#chown -R postgres:postgres /db
+#chmod -R 700 /db
+
+--даем права пользователю
+#gpasswd -a postgres wheel
+
+--для безопасности плохо но пробуем в файле /etc/sudoers
+admin ALL=(ALL:ALL) NOPASSWD:ALL
+
+--чтобы пользователь postgres нормально работал с башем, выполняем
+#usermod postgres -s /bin/bash
+
+#sudo -iu postgres
+
+--звпускаем инициализации на мастере и witness
+$initdb -k -E UTF8 -D /db/main/
+
+--в конфиге postgresql.conf раскоментируем и правим. Конфиг можно править через nano из-под postgres
+
+listen_addresses = '*'
+shared_preload_libraries = 'repmgr'
+logging_collector = on
+log_directory = '/db/log'                
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'                                   
+log_file_mode = 0600                                                     
+log_truncate_on_rotation = off                                           
+log_rotation_age = 1d                              
+log_rotation_size = 10MB              
+max_wal_senders = 10
+max_replication_slots = 10
+wal_level = 'replica'
+hot_standby = on
+archive_mode = on
+archive_command = '/bin/true'
+
+--тестовый запуск
+$pg_ctl -D /db/main start
+$pg_ctl -D /db/main stop
+
+--на мастере создаем пользователя и базу repmgr
+$createuser --superuser repmgr
+$createdb --owner=repmgr repmgr
+$psql -c "ALTER USER repmgr SET search_path TO repmgr, public;"
+
+--конфигурим файл /etc/repmgr/repmgr.conf на ноде pg1
+
+node_id=1
+node_name='pg1'
+conninfo='host=pg1 user=repmgr dbname=repmgr connect_timeout=2'
+data_directory='/db/main'
+use_replication_slots=yes
+
+failover='automatic'
+promote_command='/usr/bin/repmgr standby promote -f /etc/repmgr/repmgr.conf --log-to-file'
+follow_command='/usr/bin/repmgr standby follow -f /etc/repmgr/repmgr.conf --upstream-node-id=%n --log-to-file'
+reconnect_attempts = 4
+reconnect_interval = 8
+connection_check_type = 'ping'
+primary_visibility_consensus = true
+standby_disconnect_on_failover = true
+repmgrd_service_start_command='sudo /usr/bin/systemctl start repmgr.service'
+repmgrd_service_stop_command='sudo /usr/bin/systemctl stop repmgr.service'
+service_start_command='sudo /usr/bin/systemctl start postgresql.service'
+service_stop_command='sudo /usr/bin/systemctl stop postgresql.service'
+service_restart_command='sudo /usr/bin/systemctl restart postgresql.service'
+service_reload_command='sudo /usr/bin/systemctl reload postgresql.service'
+log_file='/db/log/replog.log'
+monitoring_history=yes
+log_status_interval=60
+
+
+--правим на мастере pg_hba.conf, добавляем строки
+local   replication     repmgr                                  trust
+host    replication     repmgr      127.0.0.1/32                trust
+host    replication     repmgr      192.168.56.0/24             trust
+local   repmgr          repmgr                              trust
+host    repmgr          repmgr      127.0.0.1/32            trust
+host    repmgr          repmgr      192.168.56.0/24         trust
+
+--перезапуск службы pg
+--регистрация мастера
+$ repmgr -f  /etc/repmgr/repmgr.conf primary register
+
+--клонирование standby
+$ repmgr -f /etc/repmgr/repmgr.conf -h pg1 -U repmgr -d repmgr standby clone --dry-run
+
+
+--проверка возможности подключения к мастеру
+$repmgr -f /etc/repmgr/repmgr.conf -U repmgr -d repmgr -h pg3 standby clone --dry-run
+
+--клонирование
+$repmgr -f /etc/repmgr/repmgr.conf -U repmgr -d repmgr -h pg3 standby clone
+
+--старт standby сервера pg
+
+--регистрация standby 
+$repmgr -f /etc/repmgr/repmgr.conf standby register
+
+--проверка состояния кластера
+$repmgr -f  /etc/repmgr/repmgr.conf cluster show
+--запросом в бд rempgr
+repmgr=# SELECT node_id, upstream_node_id, active, node_name, type, priority, slot_name FROM repmgr.nodes ORDER BY node_id;
+
+--проверка репликации
+--на мастере 
+postgres=# SELECT * FROM pg_stat_replication \gx
+--на standby
+postgres=# SELECT * FROM pg_stat_wal_receiver \gx
+
+
+
+$repmgr -f /etc/repmgr/repmgr.conf -h pg1 witness register 
+
+
+
+
+psql 'host=pg1 user=repmgr dbname=repmgr connect_timeout=2'
+
+
+
+
+du -BG /path | sort -nr
+
+
+
+select count(*) * pg_size_bytes(current_setting('wal_segment_size')) as total_size
+from pg_ls_dir('pg_wal') as t(fname)
+where fname <> 'archive_status';

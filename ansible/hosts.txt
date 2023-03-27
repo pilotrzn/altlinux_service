@@ -1,0 +1,5 @@
+[ETCD_SERVERS]
+etcd01  ansible_host=192.168.122.10 etcdname=etcd01 ip=192.168.122.10
+etcd02  ansible_host=192.168.122.11 etcdname=etcd02 ip=192.168.122.11
+etcd03  ansible_host=192.168.122.12 etcdname=etcd03 ip=192.168.122.12
+

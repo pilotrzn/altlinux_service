@@ -1,4 +1,10 @@
 ---
+- name: Test connection to etcd servers
+  hosts: ETCD_SERVERS
+  become: yes
 
-
+  tasks:
+  
+  - name: Ping servers
+    ping: 
 ...

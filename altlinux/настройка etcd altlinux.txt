@@ -30,7 +30,7 @@ ETCD_INITIAL_CLUSTER_STATE="existing"
 ETCD_INITIAL_CLUSTER_TOKEN="etcd-cluster-inp"
 ETCD_ADVERTISE_CLIENT_URLS="http://10.0.219.100:2379"
 
-
+etcd_data_dir: "/var/lib/etcd"
 
 
 на ноуте

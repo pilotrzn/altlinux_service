@@ -1,0 +1,13 @@
+---
+- name: Install packages
+  apt_rpm:
+     name:
+       - nano
+       - tmux
+       - tzdata
+       - wget
+       - atop
+       - htop
+       - sysstat
+     state: installed
+     update_cache: true

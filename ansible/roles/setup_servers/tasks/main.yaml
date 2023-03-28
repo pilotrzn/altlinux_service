@@ -1,0 +1,4 @@
+---
+#- include_tasks: ping_servers.yaml
+- include_tasks: create_users.yaml
+- include_tasks: update_servers.yaml

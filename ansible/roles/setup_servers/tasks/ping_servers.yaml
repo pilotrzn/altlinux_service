@@ -1,0 +1,7 @@
+---
+- name: Ping servers
+  ping:
+  register: results
+
+- debug:
+    var: results.ping

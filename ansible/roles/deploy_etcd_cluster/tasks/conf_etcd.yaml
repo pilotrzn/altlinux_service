@@ -1,0 +1,6 @@
+---
+- name: Generate conf file "/etc/etcd/etcd.conf"
+  template:
+    src: templates/etcd.conf.j2
+    dest: "{{ etcd_conf_file }}"
+  tags: etcd, etcd_conf

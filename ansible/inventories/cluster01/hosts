@@ -1,0 +1,18 @@
+[PATRONICLUSTER:children]
+ETCD_SERVERS
+PGSQL_SERVERS
+
+[ETCD_SERVERS]
+etcd01  ansible_host=192.168.122.100
+etcd02  ansible_host=192.168.122.101
+etcd03  ansible_host=192.168.122.102
+
+[PGSQL_SERVERS:children]
+pg_master
+pg_replica
+
+[pg_master]
+pgsql01 ansible_host=192.168.122.13
+
+[pg_replica]
+pgsql02 ansible_host=192.168.122.14

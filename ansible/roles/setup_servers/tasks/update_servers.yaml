@@ -1,0 +1,6 @@
+---
+- name: Update cache
+  shell: apt-get update
+
+- name: Upgrade system
+  shell: apt-get --enable-upgrade upgrade -y

@@ -1,0 +1,13 @@
+---
+ - name: Setup Servers
+   become: yes
+   become_method: sudo
+   gather_facts: yes
+   any_errors_fatal: true
+   hosts: PATRONICLUSTER
+   vars_files:
+     - vars/setup.yml
+     - vars/main.yml
+
+   roles:
+     - setup_servers

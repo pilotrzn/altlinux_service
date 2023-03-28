@@ -1,0 +1,13 @@
+- name: Install PostgreSQL packages
+  apt_rpm:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ postgresql_packages }}"
+  register: apt_status
+
+- debug:
+    var: "{{ apt_status }}"
+  until: apt_status is success
+  delay: 5
+  retries: 3
+  tags: install_packages, install_postgres

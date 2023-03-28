@@ -35,11 +35,11 @@ virt-clone -o etcd01 -n etcd02 -f /home/aavdonin/DATA/qemu/etcd02 --connect=qemu
 
 
 virsh net-update default add ip-dhcp-host \
-      "<host mac='52:54:00:28:1f:7b' \
-       name='etcd02' ip='192.168.122.11' />" \
+      "<host mac='52:54:00:34:c9:b4' \
+       name='etcd_test' ip='192.168.122.20' />" \
        --live --config
 
 virsh net-update default add ip-dhcp-host \
-      "<host mac='52:54:00:28:1f:8b' \
-       name='etcd03' ip='192.168.122.12' />" \
+      "<host mac='52:54:00:a8:b3:78' \
+       name='pgsql02' ip='192.168.122.14' />" \
        --live --config

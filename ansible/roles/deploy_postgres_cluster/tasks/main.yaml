@@ -1,5 +1,0 @@
----
-# tasks file for deploy_postgres_cluster
-
-- include_tasks: repo.yaml
-- include_tasks: install_pg.yaml

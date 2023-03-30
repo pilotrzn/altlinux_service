@@ -1,8 +1,0 @@
----
-# tasks file for deploy_etcd_cluster
-
-- include_tasks: install_etcd.yaml
-
-- include_tasks: conf_etcd.yaml
-
-- include_tasks: start_etcd.yaml

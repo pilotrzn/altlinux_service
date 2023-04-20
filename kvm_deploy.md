@@ -43,3 +43,17 @@ virsh net-update default add ip-dhcp-host \
       "<host mac='52:54:00:a8:b3:78' \
        name='pgsql02' ip='192.168.122.14' />" \
        --live --config
+
+
+qemu-img create -f qcow2 /home/aavdonin/hdd/qemu/qcows/alt10template 6G
+
+
+virt-install --name alt10template --memory 2048 --vcpus=2 --os-variant=alt.p10 --cdrom=/home/aavdonin/hdd/iso/alt-server-10.0-x86_64.iso --network=bridge:virbr0,model=virtio --disk path=/home/aavdonin/hdd/qemu/qcows/alt10template
+
+
+52:54:00:f8:0a:29
+
+virsh net-update default add ip-dhcp-host \
+      "<host mac='52:54:00:f8:0a:29' \
+       name='alt10pgsql' ip='192.168.122.200' />" \
+       --live --config
